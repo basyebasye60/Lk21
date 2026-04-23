@@ -1,0 +1,58 @@
+override suspend fun loadLinks(
+    data: String,
+    isCasting: Boolean,
+    subtitleCallback: (SubtitleFile) -> Unit,
+    callback: (ExtractorLink) -> Unit
+): Boolean {
+
+    val res = app.get(data, headers = mapOf(
+        "Referer" to mainUrl,
+        "User-Agent" to USER_AGENT
+    ))
+
+    val doc = res.document
+
+    // ✅ 1. Direct iframe (some pages use this)
+    doc.select("iframe").forEach {
+        val src = it.attr("src").ifEmpty {
+            it.attr("data-src")
+        }
+
+        if (src.isNotBlank()) {
+            loadExtractor(fixUrl(src), data, subtitleCallback, callback)
+        }
+    }
+
+    // ✅ 2. Extract from onclick buttons (VERY COMMON HERE)
+    doc.select("button, a").forEach { el ->
+        val onclick = el.attr("onclick")
+
+        if (onclick.contains("http")) {
+            val url = Regex("""https?://[^\s'"]+""")
+                .find(onclick)?.value
+
+            if (url != null) {
+                loadExtractor(url, data, subtitleCallback, callback)
+            }
+        }
+    }
+
+    // ✅ 3. Extract from embedded scripts (advanced)
+    doc.select("script").forEach { script ->
+        val scriptData = script.data()
+
+        val matches = Regex("""https?://[^\s'"]+""")
+            .findAll(scriptData)
+
+        matches.forEach {
+            val url = it.value
+
+            // filter obvious junk
+            if (url.contains("embed") || url.contains("stream")) {
+                loadExtractor(url, data, subtitleCallback, callback)
+            }
+        }
+    }
+
+    return true
+}
